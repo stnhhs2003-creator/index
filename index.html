@@ -389,14 +389,15 @@
     var prices = { '品項1': 100, '品項2': 100 };
     var members = [];
 
-    function renderUI() {
+    window.renderUI = function() {
         renderProducts();
         renderTable();
         calculate();
-    }
+    };
 
     function renderProducts() {
         const grid = document.getElementById('productsGrid');
+        if (!grid) return;
         grid.innerHTML = '';
         products.forEach((p, idx) => {
             const pill = document.createElement('div');
@@ -411,7 +412,7 @@
         });
     }
 
-    function updateProductName(idx, val) {
+    window.updateProductName = function(idx, val) {
         const oldP = products[idx];
         const newP = val.trim();
         if (!newP || newP === oldP) return;
@@ -427,15 +428,15 @@
         });
         renderUI();
         saveAndSync();
-    }
+    };
 
-    function updateProductPrice(p, val) {
+    window.updateProductPrice = function(p, val) {
         prices[p] = parseInt(val) || 0;
         calculate();
         saveAndSync();
-    }
+    };
 
-    function addProduct() {
+    window.addProduct = function() {
         const nextNum = products.length + 1;
         const newP = '品項' + nextNum;
         products.push(newP);
@@ -446,9 +447,9 @@
         });
         renderUI();
         saveAndSync();
-    }
+    };
 
-    function removeProduct(idx) {
+    window.removeProduct = function(idx) {
         if (products.length <= 1) {
             showToast('至少需保留一個品項！');
             return;
@@ -461,7 +462,7 @@
         });
         renderUI();
         saveAndSync();
-    }
+    };
 
     function renderTable() {
         const header = document.getElementById('tableHeader');
@@ -496,15 +497,15 @@
         });
     }
 
-    function updateMemberName(id, val) {
+    window.updateMemberName = function(id, val) {
         const m = members.find(x => x.id === id);
         if (m) {
             m.name = val;
             saveAndSync();
         }
-    }
+    };
 
-    function updateMemberQty(id, p, inputEl) {
+    window.updateMemberQty = function(id, p, inputEl) {
         const m = members.find(x => x.id === id);
         if (m) {
             const val = parseInt(inputEl.value) || 0;
@@ -515,24 +516,24 @@
             calculate();
             saveAndSync();
         }
-    }
+    };
 
-    function addMember() {
+    window.addMember = function() {
         let qtys = {};
         products.forEach(p => qtys[p] = 0);
         members.push({ id: Math.random().toString(36).substr(2, 9), name: '成員', qtys });
         renderUI();
         saveAndSync();
-    }
+    };
 
-    function removeMember(id) {
+    window.removeMember = function(id) {
         const idx = members.findIndex(x => x.id === id);
         if (idx !== -1) {
             members.splice(idx, 1);
             renderUI();
             saveAndSync();
         }
-    }
+    };
 
     function calculate() {
         let pTotals = {};
@@ -709,18 +710,36 @@
         document.getElementById('exportModal').style.display = 'none';
     }
 
-    function showToast(msg, type) {
+    function showToast(msg) {
         const container = document.getElementById('toastContainer');
-        if (!container) return;
-        const toast = document.createElement('div');
-        toast.className = `toast`;
+        let toast = document.getElementById('toast');
+        if (!toast) {
+            toast = document.createElement('div');
+            toast.id = 'toast';
+            toast.className = 'toast';
+            document.body.appendChild(toast);
+        }
         toast.innerText = msg;
-        container.appendChild(toast);
-        setTimeout(() => toast.remove(), 3000);
+        toast.style.display = 'block';
+        setTimeout(() => toast.style.display = 'none', 3000);
+    }
+
+    function initCloudAndRealtime() {
+        var hashData = getHashPayload();
+        var queryData = getQueryPayload();
+        var targetPayload = hashData || queryData;
+
+        if (targetPayload) {
+            applyRemoteData(targetPayload);
+        } else {
+            renderUI();
+        }
+
+        window.addEventListener('hashchange', function() {
             var p = getHashPayload();
             if (p) applyRemoteData(p);
         });
-    };
+    }
 
     function getHashPayload() {
         try {
