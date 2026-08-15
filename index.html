@@ -1381,18 +1381,30 @@
 
         var hasUrlDataLoaded = false;
         if (urlData) {
+            // 清理 LINE 轉發可能多附加的 & 符號或 # 符號
+            if (urlData.indexOf('&') !== -1) urlData = urlData.split('&')[0];
+            if (urlData.indexOf('#') !== -1) urlData = urlData.split('#')[0];
+
             try {
-                var jsonStr = decodeURIComponent(escape(atob(urlData)));
+                var rawDecoded = atob(decodeURIComponent(urlData));
+                var jsonStr = decodeURIComponent(escape(rawDecoded));
                 var d = JSON.parse(jsonStr);
                 applyRemoteData(d);
                 hasUrlDataLoaded = true;
             } catch(e) {
                 try {
-                    var jsonStr = decodeURIComponent(atob(urlData));
+                    var jsonStr = decodeURIComponent(escape(atob(urlData)));
                     var d = JSON.parse(jsonStr);
                     applyRemoteData(d);
                     hasUrlDataLoaded = true;
-                } catch(err) {}
+                } catch(err1) {
+                    try {
+                        var jsonStr = decodeURIComponent(atob(urlData));
+                        var d = JSON.parse(jsonStr);
+                        applyRemoteData(d);
+                        hasUrlDataLoaded = true;
+                    } catch(err2) {}
+                }
             }
         }
 
