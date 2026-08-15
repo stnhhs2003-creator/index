@@ -11,6 +11,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;600;800;900&display=swap" rel="stylesheet">
+    <!-- LZ-String for URL compression -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js"></script>
     
     <style>
         :root {
@@ -603,7 +605,12 @@
 
         try {
             const jsonStr = JSON.stringify(payload);
-            const packed = btoa(unescape(encodeURIComponent(jsonStr)));
+            let packed = '';
+            if (typeof LZString !== 'undefined') {
+                packed = 'lz' + LZString.compressToEncodedURIComponent(jsonStr);
+            } else {
+                packed = btoa(unescape(encodeURIComponent(jsonStr)));
+            }
             
             // 1. 自動把最新點單資料儲存在瀏覽器網址列與 LocalStorage
             localStorage.setItem('baonipingan_latest_payload', jsonStr);
@@ -642,7 +649,13 @@
         };
 
         const jsonStr = JSON.stringify(minPayload);
-        const packed = btoa(unescape(encodeURIComponent(jsonStr)));
+        let packed = '';
+        if (typeof LZString !== 'undefined') {
+            packed = 'lz' + LZString.compressToEncodedURIComponent(jsonStr);
+        } else {
+            packed = btoa(unescape(encodeURIComponent(jsonStr)));
+        }
+        
         let baseUrl = window.location.origin + window.location.pathname;
         if (!baseUrl.endsWith('index.html') && !baseUrl.endsWith('/')) {
             baseUrl += '/index.html';
@@ -815,6 +828,14 @@
 
     function parseB64Data(rawStr) {
         if (!rawStr) return null;
+        
+        if (rawStr.startsWith('lz') && typeof LZString !== 'undefined') {
+            try {
+                var decompressed = LZString.decompressFromEncodedURIComponent(rawStr.substring(2));
+                if (decompressed) return JSON.parse(decompressed);
+            } catch(e) {}
+        }
+
         try {
             // 優先嘗試標準 URL 解碼
             var cleanStr = decodeURIComponent(rawStr);
