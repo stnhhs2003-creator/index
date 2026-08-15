@@ -1340,42 +1340,45 @@
     } catch(e) {}
 
     window.initCloudAndRealtime = function() {
-        if (typeof loadInitialLocalData === 'function') {
-            try { loadInitialLocalData(); } catch(e) {}
-        }
-
         const urlParams = new URLSearchParams(window.location.search);
         let urlData = urlParams.get('d');
         const urlId = urlParams.get('id');
 
         if (urlId) activeId = urlId;
 
-        // 支援 LINE 安全 Hash 解析 (#data=...)
         if (!urlData && window.location.hash && window.location.hash.includes('data=')) {
             try {
                 urlData = window.location.hash.split('data=')[1];
             } catch(e) {}
         }
 
-        // 1. 若網址攜帶數據編碼，100% 優先解碼載入
+        // 1. 優先處理解碼來自網址的資料
+        let hasUrlDataLoaded = false;
         if (urlData) {
             try {
                 const jsonStr = decodeURIComponent(escape(atob(urlData)));
                 const d = JSON.parse(jsonStr);
                 applyRemoteData(d);
+                hasUrlDataLoaded = true;
             } catch(e) {
                 try {
                     const jsonStr = decodeURIComponent(atob(urlData));
                     const d = JSON.parse(jsonStr);
                     applyRemoteData(d);
+                    hasUrlDataLoaded = true;
                 } catch(err) {}
             }
         }
 
-        // 2. 開啟 WebSocket 雙向即時廣播頻道
+        // 2. 若網址沒有附帶資料，才加載本機歷史預設資料
+        if (!hasUrlDataLoaded && typeof loadInitialLocalData === 'function') {
+            try { loadInitialLocalData(); } catch(e) {}
+        }
+
+        // 3. 開啟 WebSocket 雙向即時廣播頻道
         initWebSocketConnection();
 
-        // 3. 備用輪詢，保障 LINE 內建瀏覽器 100% 收得到
+        // 4. 備用輪詢
         setInterval(fetchLatestStateFromHttp, 1500);
     };
 
