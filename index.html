@@ -372,7 +372,7 @@
 </div>
 
 <!-- 結算文字 Modal -->
-<div class="modal-overlay" id="exportModal">
+<div class="modal-overlay" id="exportModal" onclick="if(event.target === this) closeModal()">
     <div class="modal-box">
         <h3 style="color: #0f172a; font-weight: 900;">📋 團購結算文字明細</h3>
         <p style="font-size: 0.85rem; color: #64748b; margin-top: 4px;">已自動複製！可直接發送至 LINE 群組：</p>
@@ -403,22 +403,26 @@
             const pill = document.createElement('div');
             pill.className = 'product-pill';
             pill.innerHTML = `
-                <input type="text" value="${p}" onchange="updateProductName(${idx}, this.value)">
+                <input type="text" value="${p}" oninput="updateProductNameLive(${idx}, this.value)" placeholder="品項名稱">
                 <span style="font-weight:800; color:#059669;">$</span>
-                <input type="number" value="${prices[p] || 0}" onchange="updateProductPrice('${p}', this.value)">
+                <input type="number" value="${prices[p] !== undefined ? prices[p] : 0}" oninput="updateProductPriceLive('${p}', this.value)" placeholder="價格">
                 <button onclick="removeProduct(${idx})" style="border:none; background:none; color:#ef4444; font-weight:900; cursor:pointer;">✕</button>
             `;
             grid.appendChild(pill);
         });
     }
 
-    window.updateProductName = function(idx, val) {
+    window.updateProductNameLive = function(idx, val) {
         const oldP = products[idx];
         const newP = val.trim();
-        if (!newP || newP === oldP) return;
+        if (!newP) return;
         products[idx] = newP;
-        prices[newP] = prices[oldP] || 0;
-        delete prices[oldP];
+        if (prices[oldP] !== undefined) {
+            prices[newP] = prices[oldP];
+            delete prices[oldP];
+        } else {
+            prices[newP] = 100;
+        }
 
         members.forEach(m => {
             if (m.qtys && m.qtys[oldP] !== undefined) {
@@ -426,11 +430,12 @@
                 delete m.qtys[oldP];
             }
         });
-        renderUI();
+        renderTable();
+        calculate();
         saveAndSync();
     };
 
-    window.updateProductPrice = function(p, val) {
+    window.updateProductPriceLive = function(p, val) {
         prices[p] = parseInt(val) || 0;
         calculate();
         saveAndSync();
@@ -699,16 +704,23 @@
         }
     }
 
-    function copyModalText() {
+    window.copyModalText = function() {
         const textarea = document.getElementById('exportTextarea');
-        textarea.select();
-        document.execCommand('copy');
+        if (textarea) {
+            textarea.select();
+            document.execCommand('copy');
+        }
         showToast('已複製結算文字到剪貼簿！');
-    }
+    };
 
-    function closeExportModal() {
-        document.getElementById('exportModal').style.display = 'none';
-    }
+    window.closeModal = function() {
+        const modal = document.getElementById('exportModal');
+        if (modal) modal.style.display = 'none';
+    };
+
+    window.closeExportModal = function() {
+        window.closeModal();
+    };
 
     function showToast(msg) {
         const container = document.getElementById('toastContainer');
