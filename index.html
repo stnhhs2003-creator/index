@@ -529,6 +529,7 @@
         members.push({ id: Math.random().toString(36).substr(2, 9), name: '成員', qtys });
         renderUI();
         saveAndSync();
+        showToast('➕ 已新增點單成員！填完後記得點選「🔗 複製共用連結發給好友」發送新連結喔！');
     };
 
     window.removeMember = function(id) {
@@ -758,11 +759,27 @@
         if (targetPayload) {
             applyRemoteData(targetPayload);
         } else {
-            renderUI();
+            // 如果網址沒有帶資料，嘗試讀取本機瀏覽器上次存的最新資料
+            try {
+                var localStr = localStorage.getItem('baonipingan_latest_payload');
+                if (localStr) {
+                    var localPayload = JSON.parse(localStr);
+                    applyRemoteData(localPayload);
+                } else {
+                    renderUI();
+                }
+            } catch(e) {
+                renderUI();
+            }
         }
 
         window.addEventListener('hashchange', function() {
-            var p = getHashPayload();
+            var p = getHashPayload() || getQueryPayload();
+            if (p) applyRemoteData(p);
+        });
+
+        window.addEventListener('popstate', function() {
+            var p = getHashPayload() || getQueryPayload();
             if (p) applyRemoteData(p);
         });
     }
@@ -790,12 +807,16 @@
     function parseB64Data(rawStr) {
         if (!rawStr) return null;
         try {
-            var jsonStr = decodeURIComponent(escape(atob(rawStr)));
+            // 清理網址尾端多餘字元
+            var cleanStr = rawStr.split('#')[0].split('&')[0];
+            cleanStr = decodeURIComponent(cleanStr);
+            var jsonStr = decodeURIComponent(escape(atob(cleanStr)));
             return JSON.parse(jsonStr);
         } catch(e) {
             try {
-                var jsonStr = decodeURIComponent(atob(rawStr));
-                return JSON.parse(jsonStr);
+                var cleanStr2 = rawStr.split('#')[0].split('&')[0];
+                var jsonStr2 = decodeURIComponent(atob(cleanStr2));
+                return JSON.parse(jsonStr2);
             } catch(err) {
                 return null;
             }
