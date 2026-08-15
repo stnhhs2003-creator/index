@@ -1089,13 +1089,21 @@
             prices: { ...currentPrices },
             items: orderItems
         };
+
+        const packed = btoa(encodeURIComponent(JSON.stringify(payloadObject)));
         const baseUrl = window.location.origin + window.location.pathname;
-        const shareUrl = activeId && activeId !== 'active_today_group' ? `${baseUrl}?id=${activeId}` : baseUrl;
+        const shareUrl = `${baseUrl}?d=${packed}`;
 
         navigator.clipboard.writeText(shareUrl).then(() => {
-            showToast('🔗 專屬團購網址已成功複製！發給任何人皆可秒開！', 'success');
+            showToast('🔗 含有點單明細的 LINE 共用網址已複製！發送即可秒開！', 'success');
         }).catch(() => {
-            showToast('🔗 網址已產生！', 'info');
+            const textarea = document.createElement('textarea');
+            textarea.value = shareUrl;
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+            showToast('🔗 已成功複製共用網址！', 'success');
         });
     };
 
