@@ -895,10 +895,11 @@
     }
 
     function triggerSync() {
-        if (!activeId) return;
+        if (!activeId) activeId = 'master_active_group';
         if (syncTimer) clearTimeout(syncTimer);
         syncTimer = setTimeout(() => {
             const groupData = {
+                activeId: activeId,
                 date: document.getElementById('orderDate') ? document.getElementById('orderDate').value : '',
                 endDate: document.getElementById('orderEndDate') ? document.getElementById('orderEndDate').value : '',
                 title: document.getElementById('orderTitle') ? document.getElementById('orderTitle').value : '',
@@ -908,15 +909,15 @@
                 items: orderItems
             };
             
-            // 1. 本地與雲端雙重儲存
+            // 全球資料庫同步
             if (typeof syncListAndActiveGroup === 'function') {
                 syncListAndActiveGroup(groupData);
             }
 
-            // 2. 保持網址列超簡潔短網址 (無長亂碼)
+            // 保持乾淨短網址 (不強制夾帶長 Base64)
             try {
                 const baseUrl = window.location.origin + window.location.pathname;
-                const newUrl = activeId ? `${baseUrl}?id=${activeId}` : baseUrl;
+                const newUrl = `${baseUrl}?id=${activeId}`;
                 window.history.replaceState({ path: newUrl }, '', newUrl);
             } catch(e) {}
         }, 150);
@@ -1307,21 +1308,15 @@
     };
 </script>
 
-<!-- 真實雲端即時同步模組 (npoint.io 公開雲端 REST 資料庫) -->
+<!-- 無縫極速雲端即時同步模組 (MyJSON Cloud Sync V3) -->
 <script type="module">
-    // 使用專屬的公用雲端資料庫 Bin ID (全域公開連線與即時讀寫)
-    const CLOUD_BIN_ID = 'baonipingan_live_2026';
-    const CLOUD_API_URL = 'https://api.jsonbin.io/v3/b/66b000001234567890abcdef'; // 備用方案
-
-    // 使用極簡跨網域 REST 端點，確保在任何手機、電腦與 LINE 內頁完全不受擋
-    const REST_STORE_URL = 'https://jsonblob.com/api/jsonBlob/1273294829384729384'; // JsonBlob 公開 REST 端點
-
+    const CLOUD_SYNC_ENDPOINT = 'https://api.myjson.online/v1/records/4819d9b4-b903-4c91-912b-2a912e75e110';
     window.myClientId = 'client_' + Math.random().toString(36).substr(2, 9);
-    let lastSyncedJson = '';
+    let lastSyncedPayloadStr = '';
 
-    // 本地跨分頁 BroadcastChannel 秒級同步
+    // 本地跨分頁秒級廣播
     try {
-        window.bcChannel = new BroadcastChannel('baonipingan_local_bc_v20');
+        window.bcChannel = new BroadcastChannel('baonipingan_local_bc_v30');
         window.bcChannel.onmessage = (event) => {
             if (isRemoteUpdate) return;
             const payload = event.data;
@@ -1337,9 +1332,14 @@
         }
 
         const urlParams = new URLSearchParams(window.location.search);
+        const urlId = urlParams.get('id');
         const urlData = urlParams.get('d');
 
-        // 若網址自帶最新點單數據，優先直接載入
+        if (urlId) {
+            activeId = urlId;
+        }
+
+        // 1. 若網址攜帶加密數據，優先解碼
         if (urlData) {
             try {
                 const jsonStr = decodeURIComponent(atob(urlData));
@@ -1348,7 +1348,7 @@
             } catch(e) {}
         }
 
-        // 開啟全自動雲端輪詢 (無感每 1.5 秒即時抓取最新雲端點單)
+        // 2. 開啟無感 1 秒雲端即時輪詢
         startCloudPollingEngine();
     };
 
@@ -1359,17 +1359,16 @@
             statusEl.innerHTML = '🌐 雲端連線成功 (多人即時同步中)';
         }
 
-        // 輪詢雲端 JSON blob 數據
         const pollCloud = () => {
             if (isRemoteUpdate) return;
-            fetch('https://api.myjson.online/v1/records/4819d9b4-b903-4c91-912b-2a912e75e110', { cache: 'no-store' })
+            fetch(CLOUD_SYNC_ENDPOINT, { cache: 'no-store' })
                 .then(res => res.json())
                 .then(resData => {
                     const dataObj = resData && resData.data ? resData.data : resData;
                     if (dataObj && dataObj.payload && dataObj.senderId !== window.myClientId) {
                         const newJson = JSON.stringify(dataObj.payload);
-                        if (newJson !== lastSyncedJson) {
-                            lastSyncedJson = newJson;
+                        if (newJson !== lastSyncedPayloadStr) {
+                            lastSyncedPayloadStr = newJson;
                             applyRemoteData(dataObj.payload);
                         }
                     }
@@ -1378,7 +1377,7 @@
         };
 
         if (window.cloudPollTimer) clearInterval(window.cloudPollTimer);
-        window.cloudPollTimer = setInterval(pollCloud, 1500);
+        window.cloudPollTimer = setInterval(pollCloud, 1200);
         pollCloud();
     }
 
@@ -1386,6 +1385,7 @@
         if (!d) return;
         isRemoteUpdate = true;
 
+        if (d.activeId) activeId = d.activeId;
         if (d.products && Array.isArray(d.products)) products = [...d.products];
         if (d.prices) currentPrices = { ...d.prices };
         if (d.items && typeof sanitizeItems === 'function') orderItems = sanitizeItems(d.items);
@@ -1401,24 +1401,25 @@
 
     window.syncListAndActiveGroup = function(groupData) {
         const currentDocId = activeId || 'master_active_group';
+        groupData.activeId = currentDocId;
         localStorage.setItem('bao_ni_ping_an_order_v3_' + currentDocId, JSON.stringify(groupData));
-        lastSyncedJson = JSON.stringify(groupData);
+        lastSyncedPayloadStr = JSON.stringify(groupData);
 
         // A. 本地分頁廣播
         if (window.bcChannel) {
             window.bcChannel.postMessage({ senderId: window.myClientId, data: groupData });
         }
 
-        // B. 自動打回網址列 (點選複製發給別人 100% 開啟看到最新點單)
+        // B. 打回網址列 (帶入當前 ID 與完整 data)
         try {
             const packed = btoa(encodeURIComponent(JSON.stringify(groupData)));
             const baseUrl = window.location.origin + window.location.pathname;
-            const newUrl = `${baseUrl}?d=${packed}`;
+            const newUrl = `${baseUrl}?id=${currentDocId}&d=${packed}`;
             window.history.replaceState({ path: newUrl }, '', newUrl);
         } catch(e) {}
 
-        // C. 推送寫入雲端公開 API
-        fetch('https://api.myjson.online/v1/records/4819d9b4-b903-4c91-912b-2a912e75e110', {
+        // C. 即時推送到雲端伺服器 (供其他手機與LINE瀏覽器拉取)
+        fetch(CLOUD_SYNC_ENDPOINT, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ senderId: window.myClientId, payload: groupData })
