@@ -759,35 +759,72 @@
 
     function applyRemoteData(d) {
         if (!d) return;
-        isRemoteUpdate = true;
 
-        if (d.activeId) activeId = d.activeId;
         if (d.products && Array.isArray(d.products)) products = [].concat(d.products);
-        if (d.prices) currentPrices = Object.assign({}, d.prices);
-        if (d.items && typeof sanitizeItems === 'function') orderItems = sanitizeItems(d.items);
+        if (d.prices) prices = Object.assign({}, d.prices);
+        if (d.members && Array.isArray(d.members)) members = [].concat(d.members);
 
-        if (document.getElementById('orderTitle') && d.title !== undefined) document.getElementById('orderTitle').value = d.title;
-        if (document.getElementById('orderHost') && d.host !== undefined) document.getElementById('orderHost').value = d.host;
-        if (document.getElementById('orderEndDate') && d.endDate !== undefined) document.getElementById('orderEndDate').value = d.endDate;
-        if (document.getElementById('orderDate') && d.date !== undefined) document.getElementById('orderDate').value = d.date;
+        if (document.getElementById('groupTitle') && d.title !== undefined) document.getElementById('groupTitle').value = d.title;
+        if (document.getElementById('groupHost') && d.host !== undefined) document.getElementById('groupHost').value = d.host;
 
         if (typeof renderUI === 'function') renderUI();
-        isRemoteUpdate = false;
     }
 
-    window.syncListAndActiveGroup = function(groupData) {
-        var currentDocId = activeId || 'master_active_group';
-        groupData.activeId = currentDocId;
-        localStorage.setItem('bao_ni_ping_an_order_v3_' + currentDocId, JSON.stringify(groupData));
+    function exportTextSummary() {
+        const title = document.getElementById('groupTitle') ? document.getElementById('groupTitle').value.trim() : '團購單';
+        const host = document.getElementById('groupHost') ? document.getElementById('groupHost').value.trim() : '團主';
 
-        try {
-            var jsonString = JSON.stringify(groupData);
-            var packed = btoa(unescape(encodeURIComponent(jsonString)));
-            var baseUrl = window.location.origin + window.location.pathname;
-            var newUrl = baseUrl + '?d=' + packed + '#data=' + packed;
-            window.history.replaceState({ path: newUrl }, '', newUrl);
-        } catch(e) {}
-    };
+        let text = `📋 【${title}】團購結算明細\n`;
+        text += `👤 團主：${host}\n`;
+        text += `----------------------------------\n`;
+        text += `📦 開放商品單價：\n`;
+        products.forEach(p => {
+            text += `• ${p}: $${prices[p] || 0}\n`;
+        });
+        text += `----------------------------------\n`;
+        text += `👥 個人點單明細 (共 ${members.length} 人)：\n\n`;
+
+        let grandTotal = 0;
+        let pTotals = {};
+        products.forEach(p => pTotals[p] = 0);
+
+        members.forEach((m, idx) => {
+            let itemParts = [];
+            let rowSum = 0;
+            products.forEach(p => {
+                const q = (m.qtys && m.qtys[p]) ? m.qtys[p] : 0;
+                if (q > 0) {
+                    itemParts.push(`${p}×${q}`);
+                    pTotals[p] += q;
+                    rowSum += q * (prices[p] || 0);
+                }
+            });
+            grandTotal += rowSum;
+            const itemStr = itemParts.length > 0 ? itemParts.join(', ') : '未點單';
+            text += `${idx + 1}. ${m.name || '未具名'}: ${itemStr}  ➔  個人小計: $${rowSum.toLocaleString()}\n`;
+        });
+
+        text += `----------------------------------\n`;
+        text += `📦 商品訂購總件數：\n`;
+        products.forEach(p => {
+            const count = pTotals[p] || 0;
+            const pSum = count * (prices[p] || 0);
+            text += `• ${p}: ${count} 件 (金額 $${pSum.toLocaleString()})\n`;
+        });
+        text += `----------------------------------\n`;
+        text += `💰 團購營業總額：$${grandTotal.toLocaleString()}\n`;
+
+        const textarea = document.getElementById('exportTextarea');
+        if (textarea) textarea.value = text;
+        
+        document.getElementById('exportModal').style.display = 'flex';
+
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(() => {
+                showToast('📋 已自動將個人明細與總結算文字複製到剪貼簿！');
+            }).catch(() => {});
+        }
+    }
 
     if (document.readyState === 'loading') {
         window.addEventListener('DOMContentLoaded', window.initCloudAndRealtime);
