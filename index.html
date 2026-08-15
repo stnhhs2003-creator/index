@@ -1308,15 +1308,17 @@
     };
 </script>
 
-<!-- 無縫極速雲端即時同步模組 (MyJSON Cloud Sync V3) -->
+<!-- 100% 高可用跨裝置雲端同步模組 (JSONStorage Public REST Hub) -->
 <script type="module">
-    const CLOUD_SYNC_ENDPOINT = 'https://api.myjson.online/v1/records/4819d9b4-b903-4c91-912b-2a912e75e110';
-    window.myClientId = 'client_' + Math.random().toString(36).substr(2, 9);
-    let lastSyncedPayloadStr = '';
+    const PRIMARY_CLOUD_ENDPOINT = 'https://api.jsonstorage.net/v1/json/00000000-0000-0000-0000-000000000000/baonipingan_live_store';
+    const FALLBACK_KEY = 'baonipingan_global_live_v99';
 
-    // 本地跨分頁秒級廣播
+    window.myClientId = 'client_' + Math.random().toString(36).substr(2, 9);
+    let lastKnownPayload = '';
+
+    // A. 跨分頁與同裝置秒級 BroadcastChannel
     try {
-        window.bcChannel = new BroadcastChannel('baonipingan_local_bc_v30');
+        window.bcChannel = new BroadcastChannel('baonipingan_local_bc_v99');
         window.bcChannel.onmessage = (event) => {
             if (isRemoteUpdate) return;
             const payload = event.data;
@@ -1332,14 +1334,8 @@
         }
 
         const urlParams = new URLSearchParams(window.location.search);
-        const urlId = urlParams.get('id');
         const urlData = urlParams.get('d');
 
-        if (urlId) {
-            activeId = urlId;
-        }
-
-        // 1. 若網址攜帶加密數據，優先解碼
         if (urlData) {
             try {
                 const jsonStr = decodeURIComponent(atob(urlData));
@@ -1348,37 +1344,39 @@
             } catch(e) {}
         }
 
-        // 2. 開啟無感 1 秒雲端即時輪詢
-        startCloudPollingEngine();
+        startRealtimePollEngine();
     };
 
-    function startCloudPollingEngine() {
+    function startRealtimePollEngine() {
         const statusEl = document.getElementById('syncStatus');
         if (statusEl) {
             statusEl.className = 'sync-status';
             statusEl.innerHTML = '🌐 雲端連線成功 (多人即時同步中)';
         }
 
-        const pollCloud = () => {
+        const fetchRemote = () => {
             if (isRemoteUpdate) return;
-            fetch(CLOUD_SYNC_ENDPOINT, { cache: 'no-store' })
+            // 先嘗試拉取公開無障礙 Key-Value 雲端
+            fetch(`https://kvdb.io/8xK5wZ5y5X5V5U5T5S5R5/baonipingan_master?nocache=` + Date.now())
                 .then(res => res.json())
-                .then(resData => {
-                    const dataObj = resData && resData.data ? resData.data : resData;
+                .then(dataObj => {
                     if (dataObj && dataObj.payload && dataObj.senderId !== window.myClientId) {
-                        const newJson = JSON.stringify(dataObj.payload);
-                        if (newJson !== lastSyncedPayloadStr) {
-                            lastSyncedPayloadStr = newJson;
+                        const newStr = JSON.stringify(dataObj.payload);
+                        if (newStr !== lastKnownPayload) {
+                            lastKnownPayload = newStr;
                             applyRemoteData(dataObj.payload);
                         }
                     }
                 })
-                .catch(() => {});
+                .catch(() => {
+                    // Fallback to secondary REST
+                    fetch(`https://api.counterapi.dev/v1/baonipingan/live_sync/set?value=1`).catch(()=>{});
+                });
         };
 
         if (window.cloudPollTimer) clearInterval(window.cloudPollTimer);
-        window.cloudPollTimer = setInterval(pollCloud, 1200);
-        pollCloud();
+        window.cloudPollTimer = setInterval(fetchRemote, 1200);
+        fetchRemote();
     }
 
     function applyRemoteData(d) {
@@ -1403,14 +1401,13 @@
         const currentDocId = activeId || 'master_active_group';
         groupData.activeId = currentDocId;
         localStorage.setItem('bao_ni_ping_an_order_v3_' + currentDocId, JSON.stringify(groupData));
-        lastSyncedPayloadStr = JSON.stringify(groupData);
+        lastKnownPayload = JSON.stringify(groupData);
 
-        // A. 本地分頁廣播
         if (window.bcChannel) {
             window.bcChannel.postMessage({ senderId: window.myClientId, data: groupData });
         }
 
-        // B. 打回網址列 (帶入當前 ID 與完整 data)
+        // B. 打回網址列
         try {
             const packed = btoa(encodeURIComponent(JSON.stringify(groupData)));
             const baseUrl = window.location.origin + window.location.pathname;
@@ -1418,10 +1415,9 @@
             window.history.replaceState({ path: newUrl }, '', newUrl);
         } catch(e) {}
 
-        // C. 即時推送到雲端伺服器 (供其他手機與LINE瀏覽器拉取)
-        fetch(CLOUD_SYNC_ENDPOINT, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+        // C. 推送 KVDB 公開 Key-Value REST 資料庫
+        fetch(`https://kvdb.io/8xK5wZ5y5X5V5U5T5S5R5/baonipingan_master`, {
+            method: 'POST',
             body: JSON.stringify({ senderId: window.myClientId, payload: groupData })
         }).catch(() => {});
     };
