@@ -622,7 +622,12 @@
         const titleText = document.getElementById('groupTitle').value.trim() || '團購';
         const jsonStr = JSON.stringify(payload);
         const packed = btoa(unescape(encodeURIComponent(jsonStr)));
-        const baseUrl = window.location.origin + window.location.pathname;
+        let baseUrl = window.location.origin + window.location.pathname;
+        if (!baseUrl.endsWith('index.html') && !baseUrl.endsWith('/')) {
+            baseUrl += '/index.html';
+        } else if (baseUrl.endsWith('/')) {
+            baseUrl += 'index.html';
+        }
         const shareUrl = `${baseUrl}#data=${packed}`;
 
         // 整理適合直接發到 LINE 的對話框文字
