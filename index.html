@@ -631,7 +631,7 @@
 
         const titleText = document.getElementById('groupTitle').value.trim() || '團購';
         const jsonStr = JSON.stringify(payload);
-        const packed = btoa(unescape(encodeURIComponent(jsonStr)));
+        const packed = encodeURIComponent(jsonStr);
         let baseUrl = window.location.origin + window.location.pathname;
         if (!baseUrl.endsWith('index.html') && !baseUrl.endsWith('/')) {
             baseUrl += '/index.html';
@@ -640,7 +640,7 @@
         }
         const shareUrl = `${baseUrl}?d=${packed}`;
 
-        // 整理適合直接發到 LINE 的對話框文字 (乾淨 URL 確保 LINE 100% 可點擊)
+        // 整理適合直接發到 LINE 的對話框文字 (純超連結格式，LINE 100% 秒開)
         const lineText = `🛒 【${titleText}】點單邀請連結\n👉 點擊開啟即可填寫或查看點單：\n${shareUrl}`;
 
         if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -807,15 +807,23 @@
     function parseB64Data(rawStr) {
         if (!rawStr) return null;
         try {
-            // 清理網址尾端多餘字元
-            var cleanStr = rawStr.split('#')[0].split('&')[0];
-            cleanStr = decodeURIComponent(cleanStr);
-            var jsonStr = decodeURIComponent(escape(atob(cleanStr)));
+            // 優先嘗試標準 URL 解碼
+            var cleanStr = decodeURIComponent(rawStr);
+            if (cleanStr.startsWith('{') && cleanStr.endsWith('}')) {
+                return JSON.parse(cleanStr);
+            }
+        } catch(e) {}
+
+        try {
+            // 備用 Base64 解碼 (相容舊連結)
+            var cleanStr2 = rawStr.split('#')[0].split('&')[0];
+            cleanStr2 = decodeURIComponent(cleanStr2);
+            var jsonStr = decodeURIComponent(escape(atob(cleanStr2)));
             return JSON.parse(jsonStr);
         } catch(e) {
             try {
-                var cleanStr2 = rawStr.split('#')[0].split('&')[0];
-                var jsonStr2 = decodeURIComponent(atob(cleanStr2));
+                var cleanStr3 = rawStr.split('#')[0].split('&')[0];
+                var jsonStr2 = decodeURIComponent(atob(cleanStr3));
                 return JSON.parse(jsonStr2);
             } catch(err) {
                 return null;
