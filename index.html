@@ -593,8 +593,8 @@
 
     function saveAndSync() {
         const payload = {
-            title: document.getElementById('groupTitle').value,
-            host: document.getElementById('groupHost').value,
+            title: document.getElementById('groupTitle') ? document.getElementById('groupTitle').value : '',
+            host: document.getElementById('groupHost') ? document.getElementById('groupHost').value : '',
             products: products,
             prices: prices,
             members: members
@@ -603,8 +603,17 @@
         try {
             const jsonStr = JSON.stringify(payload);
             const packed = btoa(unescape(encodeURIComponent(jsonStr)));
-            const baseUrl = window.location.origin + window.location.pathname;
-            const newUrl = baseUrl + '#data=' + packed;
+            
+            // 1. 自動把最新點單資料儲存在瀏覽器網址列與 LocalStorage
+            localStorage.setItem('baonipingan_latest_payload', jsonStr);
+
+            let baseUrl = window.location.origin + window.location.pathname;
+            if (!baseUrl.endsWith('index.html') && !baseUrl.endsWith('/')) {
+                baseUrl += '/index.html';
+            } else if (baseUrl.endsWith('/')) {
+                baseUrl += 'index.html';
+            }
+            const newUrl = baseUrl + '?d=' + packed;
             window.history.replaceState({ path: newUrl }, '', newUrl);
         } catch(e) {}
     }
@@ -628,9 +637,9 @@
         } else if (baseUrl.endsWith('/')) {
             baseUrl += 'index.html';
         }
-        const shareUrl = `${baseUrl}#data=${packed}`;
+        const shareUrl = `${baseUrl}?d=${packed}`;
 
-        // 整理適合直接發到 LINE 的對話框文字
+        // 整理適合直接發到 LINE 的對話框文字 (乾淨 URL 確保 LINE 100% 可點擊)
         const lineText = `🛒 【${titleText}】點單邀請連結\n👉 點擊開啟即可填寫或查看點單：\n${shareUrl}`;
 
         if (navigator.clipboard && navigator.clipboard.writeText) {
