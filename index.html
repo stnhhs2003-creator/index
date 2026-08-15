@@ -11,8 +11,9 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;600;800;900&display=swap" rel="stylesheet">
-    <!-- LZ-String for URL compression -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js"></script>
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
     
     <style>
         :root {
@@ -386,6 +387,7 @@
     </div>
 </div>
 
+
 <script>
     var products = ['品項1', '品項2'];
     var prices = { '品項1': 100, '品項2': 100 };
@@ -564,37 +566,85 @@
         document.getElementById('grandTotalText').innerText = '$' + grandTotal.toLocaleString();
 
         const qSummaryEl = document.getElementById('qtySummaryText');
-        if (products.length === 0) {
-            qSummaryEl.innerText = '無品項';
+        if (qSummaryEl) {
+            if (products.length === 0) {
+                qSummaryEl.innerText = '無品項';
+            } else {
+                qSummaryEl.innerHTML = products.map(p => `${p}: <b style="color:#fbbf24;">${pTotals[p] || 0}</b> 件`).join(' | ');
+            }
+        }
+    }
+
+    // -----------------------------------------
+    // Firebase 初始化與即時同步邏輯
+    // -----------------------------------------
+    const firebaseConfig = {
+      apiKey: "AIzaSyCMIQHFWgny8Jk6p3kaiZZGKRCxAmgnU4I",
+      authDomain: "popo-4082e.firebaseapp.com",
+      projectId: "popo-4082e",
+      storageBucket: "popo-4082e.firebasestorage.app",
+      messagingSenderId: "477684073985",
+      appId: "1:477684073985:web:a20825b7a79610a6882200",
+      measurementId: "G-F58G328QLM",
+      databaseURL: "https://popo-4082e-default-rtdb.firebaseio.com"
+    };
+
+    if (!firebase.apps.length) {
+        firebase.initializeApp(firebaseConfig);
+    }
+    const db = firebase.database();
+    
+    let currentGroupId = null;
+    let isRemoteUpdating = false;
+
+    function initCloudAndRealtime() {
+        var urlParams = new URLSearchParams(window.location.search);
+        var id = urlParams.get('id');
+
+        if (id) {
+            currentGroupId = id;
+            listenToGroup(id);
         } else {
-            qSummaryEl.innerHTML = products.map(p => `${p}: <b style="color:#fbbf24;">${pTotals[p] || 0}</b> 件`).join(' | ');
-        }
-    }
-
-    function startNewGroupConfirm() {
-        if (confirm('⚠️ 確定要建立全新的開團嗎？\n這將會清空畫面上的舊團名、商品與所有成員點單！')) {
-            products = ['品項1', '品項2'];
-            prices = { '品項1': 100, '品項2': 100 };
-            members = [];
-            document.getElementById('groupTitle').value = '';
-            document.getElementById('groupHost').value = '';
-            renderUI();
+            // 自動建立一個新的專屬房間
+            currentGroupId = 'group-' + Math.random().toString(36).substr(2, 9);
+            var newUrl = window.location.origin + window.location.pathname + '?id=' + currentGroupId;
+            window.history.replaceState({ path: newUrl }, '', newUrl);
             
-            // 清空網址 Hash
+            // 嘗試讀取本地舊資料作為初始值
             try {
-                const baseUrl = window.location.origin + window.location.pathname;
-                window.history.replaceState({ path: baseUrl }, '', baseUrl);
-            } catch(e) {}
-            
-            showToast('🚀 已重置畫面！您可以開始輸入新團名與商品囉！');
+                var localStr = localStorage.getItem('baonipingan_latest_payload');
+                if (localStr) {
+                    var localData = JSON.parse(localStr);
+                    applyRemoteData(localData);
+                } else {
+                    renderUI();
+                }
+            } catch(e) {
+                renderUI();
+            }
+            saveAndSync(); // 寫入到新的 Firebase 房間
+            listenToGroup(currentGroupId);
         }
     }
 
-    function clearAllData() {
-        startNewGroupConfirm();
+    function listenToGroup(id) {
+        db.ref('groups/' + id).on('value', (snapshot) => {
+            const data = snapshot.val();
+            if (data) {
+                isRemoteUpdating = true;
+                applyRemoteData(data);
+                isRemoteUpdating = false;
+            } else if (!data && currentGroupId === id) {
+                // 如果房間沒資料，把目前的預設狀態推上去
+                saveAndSync();
+            }
+        });
     }
 
     function saveAndSync() {
+        if (isRemoteUpdating) return; // 避免無窮迴圈
+        if (!currentGroupId) return;
+
         const payload = {
             title: document.getElementById('groupTitle') ? document.getElementById('groupTitle').value : '',
             host: document.getElementById('groupHost') ? document.getElementById('groupHost').value : '',
@@ -603,71 +653,61 @@
             members: members
         };
 
-        try {
-            const jsonStr = JSON.stringify(payload);
-            let packed = '';
-            if (typeof LZString !== 'undefined') {
-                packed = 'lz' + LZString.compressToEncodedURIComponent(jsonStr);
-            } else {
-                packed = btoa(unescape(encodeURIComponent(jsonStr)));
-            }
-            
-            // 1. 自動把最新點單資料儲存在瀏覽器網址列與 LocalStorage
-            localStorage.setItem('baonipingan_latest_payload', jsonStr);
+        // 寫入本地備份
+        try { localStorage.setItem('baonipingan_latest_payload', JSON.stringify(payload)); } catch(e) {}
 
-            let baseUrl = window.location.origin + window.location.pathname;
-            if (!baseUrl.endsWith('index.html') && !baseUrl.endsWith('/')) {
-                baseUrl += '/index.html';
-            } else if (baseUrl.endsWith('/')) {
-                baseUrl += 'index.html';
+        // 推送至 Firebase
+        db.ref('groups/' + currentGroupId).set(payload).catch(err => {
+            console.error('Firebase 寫入失敗', err);
+        });
+    }
+
+    function startNewGroupConfirm() {
+        if (confirm('⚠️ 確定要建立全新的開團嗎？\n這將會產生一個全新的專屬網址，並清空目前畫面。')) {
+            products = ['品項1', '品項2'];
+            prices = { '品項1': 100, '品項2': 100 };
+            members = [];
+            document.getElementById('groupTitle').value = '';
+            document.getElementById('groupHost').value = '';
+            
+            // 斷開舊的監聽
+            if (currentGroupId) {
+                db.ref('groups/' + currentGroupId).off();
             }
-            const newUrl = baseUrl + '?d=' + packed;
+
+            // 產生新房間 ID
+            currentGroupId = 'group-' + Math.random().toString(36).substr(2, 9);
+            var newUrl = window.location.origin + window.location.pathname + '?id=' + currentGroupId;
             window.history.replaceState({ path: newUrl }, '', newUrl);
-        } catch(e) {}
+
+            renderUI();
+            saveAndSync();
+            listenToGroup(currentGroupId);
+            
+            showToast('🚀 已重置畫面並建立全新專屬房間！');
+        }
+    }
+
+    function clearAllData() {
+        startNewGroupConfirm();
     }
 
     function copyShareLink() {
         saveAndSync();
-
-        const titleText = document.getElementById('groupTitle').value.trim() || '團購';
         
-        // 壓縮鍵名，讓網址超級短，確保傳到 LINE 絕不被裁切截斷！
-        const minMembers = members.map(m => {
-            let qArr = {};
-            products.forEach(p => {
-                if (m.qtys && m.qtys[p]) qArr[p] = m.qtys[p];
-            });
-            return { n: m.name || '', q: qArr };
-        });
-
-        const minPayload = {
-            t: document.getElementById('groupTitle').value,
-            h: document.getElementById('groupHost').value,
-            p: products,
-            pr: prices,
-            m: minMembers
-        };
-
-        const jsonStr = JSON.stringify(minPayload);
-        let packed = '';
-        if (typeof LZString !== 'undefined') {
-            packed = 'lz' + LZString.compressToEncodedURIComponent(jsonStr);
-        } else {
-            packed = btoa(unescape(encodeURIComponent(jsonStr)));
-        }
-        
+        // 取得目前的完整網址
         let baseUrl = window.location.origin + window.location.pathname;
         if (!baseUrl.endsWith('index.html') && !baseUrl.endsWith('/')) {
             baseUrl += '/index.html';
         } else if (baseUrl.endsWith('/')) {
             baseUrl += 'index.html';
         }
-        const shareUrl = `${baseUrl}?d=${packed}`;
+        
+        const shareUrl = `${baseUrl}?id=${currentGroupId}`;
 
-        // 直接複製純網址，避免 LINE 將中文與網址黏在一起造成判讀失敗
         if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(shareUrl).then(() => {
-                showToast('🔗 已複製即時專屬點單連結！貼到 LINE 聊天室發送即可！');
+                showToast('🔗 已複製您的即時專屬點單連結！貼到 LINE 聊天室發送即可！');
             }).catch(() => fallbackCopy(shareUrl));
         } else {
             fallbackCopy(shareUrl);
@@ -683,178 +723,11 @@
         textarea.select();
         try {
             document.execCommand('copy');
-            showToast('🔗 已複製即時共用連結！');
+            showToast('🔗 已複製即時專屬點單連結！');
         } catch(e) {}
         document.body.removeChild(textarea);
     }
 
-    function exportTextSummary() {
-        const title = document.getElementById('groupTitle').value.trim() || '團購單';
-        const host = document.getElementById('groupHost').value.trim() || '團主';
-
-        let text = `📋 【${title}】結算明細\n`;
-        text += `👤 團主：${host}\n`;
-        text += `----------------------------------\n`;
-        text += `📦 商品單價：\n`;
-        products.forEach(p => {
-            text += `• ${p}: $${prices[p] || 0}\n`;
-        });
-        text += `----------------------------------\n`;
-        text += `👥 成員點單明細 (共 ${members.length} 人)：\n\n`;
-
-        let grandTotal = 0;
-        let pTotals = {};
-        products.forEach(p => pTotals[p] = 0);
-
-        members.forEach((m, idx) => {
-            let itemParts = [];
-            let rowSum = 0;
-            products.forEach(p => {
-                const q = (m.qtys && m.qtys[p]) ? m.qtys[p] : 0;
-                if (q > 0) {
-                    itemParts.push(`${p}×${q}`);
-                    pTotals[p] += q;
-                    rowSum += q * (prices[p] || 0);
-                }
-            });
-            if (itemParts.length > 0) {
-                grandTotal += rowSum;
-                text += `${idx + 1}. ${m.name}: ${itemParts.join(', ')} (小計 $${rowSum.toLocaleString()})\n`;
-            }
-        });
-
-        text += `----------------------------------\n`;
-        text += `📦 商品需求總計：\n`;
-        products.forEach(p => {
-            const count = pTotals[p] || 0;
-            const pSum = count * (prices[p] || 0);
-            text += `• ${p}: ${count} 件 ($${pSum.toLocaleString()})\n`;
-        });
-        text += `----------------------------------\n`;
-        text += `💰 團購總金額：$${grandTotal.toLocaleString()}\n`;
-
-        document.getElementById('exportTextarea').value = text;
-        document.getElementById('exportModal').style.display = 'flex';
-
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(text).catch(() => {});
-        }
-    }
-
-    window.copyModalText = function() {
-        const textarea = document.getElementById('exportTextarea');
-        if (textarea) {
-            textarea.select();
-            document.execCommand('copy');
-        }
-        showToast('已複製結算文字到剪貼簿！');
-    };
-
-    window.closeModal = function() {
-        const modal = document.getElementById('exportModal');
-        if (modal) modal.style.display = 'none';
-    };
-
-    window.closeExportModal = function() {
-        window.closeModal();
-    };
-
-    function showToast(msg) {
-        const container = document.getElementById('toastContainer');
-        let toast = document.getElementById('toast');
-        if (!toast) {
-            toast = document.createElement('div');
-            toast.id = 'toast';
-            toast.className = 'toast';
-            document.body.appendChild(toast);
-        }
-        toast.innerText = msg;
-        toast.style.display = 'block';
-        setTimeout(() => toast.style.display = 'none', 3000);
-    }
-
-    function initCloudAndRealtime() {
-        var hashData = getHashPayload();
-        var queryData = getQueryPayload();
-        var targetPayload = hashData || queryData;
-
-        if (targetPayload) {
-            applyRemoteData(targetPayload);
-        } else {
-            // 如果網址沒有帶資料，嘗試讀取本機瀏覽器上次存的最新資料
-            try {
-                var localStr = localStorage.getItem('baonipingan_latest_payload');
-                if (localStr) {
-                    var localPayload = JSON.parse(localStr);
-                    applyRemoteData(localPayload);
-                } else {
-                    renderUI();
-                }
-            } catch(e) {
-                renderUI();
-            }
-        }
-
-        window.addEventListener('hashchange', function() {
-            var p = getHashPayload() || getQueryPayload();
-            if (p) applyRemoteData(p);
-        });
-
-        window.addEventListener('popstate', function() {
-            var p = getHashPayload() || getQueryPayload();
-            if (p) applyRemoteData(p);
-        });
-    }
-
-    function getHashPayload() {
-        try {
-            if (window.location.hash && window.location.hash.indexOf('data=') !== -1) {
-                var raw = window.location.hash.split('data=')[1];
-                if (raw.indexOf('&') !== -1) raw = raw.split('&')[0];
-                return parseB64Data(raw);
-            }
-        } catch(e) {}
-        return null;
-    }
-
-    function getQueryPayload() {
-        try {
-            var urlParams = new URLSearchParams(window.location.search);
-            var raw = urlParams.get('d');
-            if (raw) return parseB64Data(raw);
-        } catch(e) {}
-        return null;
-    }
-
-    function parseB64Data(rawStr) {
-        if (!rawStr) return null;
-        
-        if (rawStr.startsWith('lz') && typeof LZString !== 'undefined') {
-            try {
-                var decompressed = LZString.decompressFromEncodedURIComponent(rawStr.substring(2));
-                if (decompressed) return JSON.parse(decompressed);
-            } catch(e) {}
-        }
-
-        try {
-            // 優先嘗試標準 URL 解碼
-            var cleanStr = decodeURIComponent(rawStr);
-            if (cleanStr.startsWith('{') && cleanStr.endsWith('}')) {
-                return JSON.parse(cleanStr);
-            }
-        } catch(e) {}
-
-        try {
-            // 備用 Base64 解碼 (相容舊連結)
-            var cleanStr2 = rawStr.split('#')[0].split('&')[0];
-            cleanStr2 = decodeURIComponent(cleanStr2);
-            var jsonStr = decodeURIComponent(escape(atob(cleanStr2)));
-            return JSON.parse(jsonStr);
-        } catch(e) {
-            try {
-                var cleanStr3 = rawStr.split('#')[0].split('&')[0];
-                var jsonStr2 = decodeURIComponent(atob(cleanStr3));
-                return JSON.parse(jsonStr2);
             } catch(err) {
                 return null;
             }
