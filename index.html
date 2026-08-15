@@ -621,17 +621,28 @@
 
     function copyShareLink() {
         saveAndSync();
-        const payload = {
-            title: document.getElementById('groupTitle').value,
-            host: document.getElementById('groupHost').value,
-            products: products,
-            prices: prices,
-            members: members
-        };
 
         const titleText = document.getElementById('groupTitle').value.trim() || '團購';
-        const jsonStr = JSON.stringify(payload);
-        const packed = encodeURIComponent(jsonStr);
+        
+        // 壓縮鍵名，讓網址超級短，確保傳到 LINE 絕不被裁切截斷！
+        const minMembers = members.map(m => {
+            let qArr = {};
+            products.forEach(p => {
+                if (m.qtys && m.qtys[p]) qArr[p] = m.qtys[p];
+            });
+            return { n: m.name || '', q: qArr };
+        });
+
+        const minPayload = {
+            t: document.getElementById('groupTitle').value,
+            h: document.getElementById('groupHost').value,
+            p: products,
+            pr: prices,
+            m: minMembers
+        };
+
+        const jsonStr = JSON.stringify(minPayload);
+        const packed = btoa(unescape(encodeURIComponent(jsonStr)));
         let baseUrl = window.location.origin + window.location.pathname;
         if (!baseUrl.endsWith('index.html') && !baseUrl.endsWith('/')) {
             baseUrl += '/index.html';
@@ -640,15 +651,13 @@
         }
         const shareUrl = `${baseUrl}?d=${packed}`;
 
-        // 整理適合直接發到 LINE 的對話框文字 (純超連結格式，LINE 100% 秒開)
-        const lineText = `🛒 【${titleText}】點單邀請連結\n👉 點擊開啟即可填寫或查看點單：\n${shareUrl}`;
-
+        // 直接複製純網址，避免 LINE 將中文與網址黏在一起造成判讀失敗
         if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(lineText).then(() => {
-                showToast('🔗 LINE 點單邀請連結已複製！貼到 LINE 聊天室發送即可！');
-            }).catch(() => fallbackCopy(lineText));
+            navigator.clipboard.writeText(shareUrl).then(() => {
+                showToast('🔗 已複製即時專屬點單連結！貼到 LINE 聊天室發送即可！');
+            }).catch(() => fallbackCopy(shareUrl));
         } else {
-            fallbackCopy(lineText);
+            fallbackCopy(shareUrl);
         }
     }
 
@@ -834,12 +843,28 @@
     function applyRemoteData(d) {
         if (!d) return;
 
-        if (d.products && Array.isArray(d.products)) products = [].concat(d.products);
-        if (d.prices) prices = Object.assign({}, d.prices);
-        if (d.members && Array.isArray(d.members)) members = [].concat(d.members);
+        // 支援長鍵名與超簡短壓縮鍵名
+        const prodList = d.products || d.p;
+        const priceObj = d.prices || d.pr;
+        const memList = d.members || d.m;
+        const titleVal = d.title !== undefined ? d.title : d.t;
+        const hostVal = d.host !== undefined ? d.host : d.h;
 
-        if (document.getElementById('groupTitle') && d.title !== undefined) document.getElementById('groupTitle').value = d.title;
-        if (document.getElementById('groupHost') && d.host !== undefined) document.getElementById('groupHost').value = d.host;
+        if (prodList && Array.isArray(prodList)) products = [].concat(prodList);
+        if (priceObj) prices = Object.assign({}, priceObj);
+        
+        if (memList && Array.isArray(memList)) {
+            members = memList.map(m => {
+                return {
+                    id: m.id || Math.random().toString(36).substr(2, 9),
+                    name: m.name !== undefined ? m.name : (m.n !== undefined ? m.n : ''),
+                    qtys: m.qtys || m.q || {}
+                };
+            });
+        }
+
+        if (document.getElementById('groupTitle') && titleVal !== undefined) document.getElementById('groupTitle').value = titleVal;
+        if (document.getElementById('groupHost') && hostVal !== undefined) document.getElementById('groupHost').value = hostVal;
 
         if (typeof renderUI === 'function') renderUI();
     }
