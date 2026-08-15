@@ -1076,10 +1076,6 @@
     };
 
     window.copyShareLink = function() {
-        if (!activeId) {
-            showToast("請先點擊左側「🚀 確定建立全新開團」！", "warning");
-            return;
-        }
         saveArchiveManual();
         const payloadObject = {
             date: document.getElementById('orderDate') ? document.getElementById('orderDate').value : '',
@@ -1091,22 +1087,36 @@
             items: orderItems
         };
 
-        const packed = btoa(encodeURIComponent(JSON.stringify(payloadObject)));
+        // LINE 安全 Hash 編碼 (防止 LINE 截斷網址長度)
+        const jsonString = JSON.stringify(payloadObject);
+        const packed = btoa(unescape(encodeURIComponent(jsonString)));
         const baseUrl = window.location.origin + window.location.pathname;
-        const shareUrl = `${baseUrl}?d=${packed}`;
+        const shareUrl = `${baseUrl}#data=${packed}`;
 
-        navigator.clipboard.writeText(shareUrl).then(() => {
-            showToast('🔗 含有點單明細的 LINE 共用網址已複製！發送即可秒開！', 'success');
-        }).catch(() => {
-            const textarea = document.createElement('textarea');
-            textarea.value = shareUrl;
-            document.body.appendChild(textarea);
-            textarea.select();
-            document.execCommand('copy');
-            document.body.removeChild(textarea);
-            showToast('🔗 已成功複製共用網址！', 'success');
-        });
+        const copySuccess = () => {
+            showToast('🔗 點單連結已成功複製！在 LINE 貼出發送，好友點開即可看到完整點單！', 'success');
+        };
+
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(shareUrl).then(copySuccess).catch(() => fallbackCopy(shareUrl));
+        } else {
+            fallbackCopy(shareUrl);
+        }
     };
+
+    function fallbackCopy(text) {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+            document.execCommand('copy');
+            showToast('🔗 已複製含有點單資料的 LINE 專屬連結！', 'success');
+        } catch(e) {}
+        document.body.removeChild(textarea);
+    }
 
     window.exportHistorySummary = function() {
         const defData = getDefaultData();
@@ -1308,17 +1318,18 @@
     };
 </script>
 
-<!-- 100% 高可用跨裝置雲端同步模組 (JSONStorage Public REST Hub) -->
+<!-- 100% 雙向 WebSocket 與全網廣播極速同步模組 -->
 <script type="module">
-    const PRIMARY_CLOUD_ENDPOINT = 'https://api.jsonstorage.net/v1/json/00000000-0000-0000-0000-000000000000/baonipingan_live_store';
-    const FALLBACK_KEY = 'baonipingan_global_live_v99';
+    const WS_TOPIC_ROOM = 'baonipingan_live_room_v450';
+    const PUBLIC_RELAY_URL = `wss://ntfy.sh/${WS_TOPIC_ROOM}/ws`;
 
     window.myClientId = 'client_' + Math.random().toString(36).substr(2, 9);
-    let lastKnownPayload = '';
+    let wsSocket = null;
+    let isConnecting = false;
 
-    // A. 跨分頁與同裝置秒級 BroadcastChannel
+    // A. 同裝置多分頁秒級廣播
     try {
-        window.bcChannel = new BroadcastChannel('baonipingan_local_bc_v99');
+        window.bcChannel = new BroadcastChannel('baonipingan_local_bc_v450');
         window.bcChannel.onmessage = (event) => {
             if (isRemoteUpdate) return;
             const payload = event.data;
@@ -1334,49 +1345,100 @@
         }
 
         const urlParams = new URLSearchParams(window.location.search);
-        const urlData = urlParams.get('d');
+        let urlData = urlParams.get('d');
+        const urlId = urlParams.get('id');
 
-        if (urlData) {
+        if (urlId) activeId = urlId;
+
+        // 支援 LINE 安全 Hash 解析 (#data=...)
+        if (!urlData && window.location.hash && window.location.hash.includes('data=')) {
             try {
-                const jsonStr = decodeURIComponent(atob(urlData));
-                const d = JSON.parse(jsonStr);
-                applyRemoteData(d);
+                urlData = window.location.hash.split('data=')[1];
             } catch(e) {}
         }
 
-        startRealtimePollEngine();
-    };
-
-    function startRealtimePollEngine() {
-        const statusEl = document.getElementById('syncStatus');
-        if (statusEl) {
-            statusEl.className = 'sync-status';
-            statusEl.innerHTML = '🌐 雲端連線成功 (多人即時同步中)';
+        // 1. 若網址攜帶數據編碼，100% 優先解碼載入
+        if (urlData) {
+            try {
+                const jsonStr = decodeURIComponent(escape(atob(urlData)));
+                const d = JSON.parse(jsonStr);
+                applyRemoteData(d);
+            } catch(e) {
+                try {
+                    const jsonStr = decodeURIComponent(atob(urlData));
+                    const d = JSON.parse(jsonStr);
+                    applyRemoteData(d);
+                } catch(err) {}
+            }
         }
 
-        const fetchRemote = () => {
-            if (isRemoteUpdate) return;
-            // 先嘗試拉取公開無障礙 Key-Value 雲端
-            fetch(`https://kvdb.io/8xK5wZ5y5X5V5U5T5S5R5/baonipingan_master?nocache=` + Date.now())
-                .then(res => res.json())
-                .then(dataObj => {
-                    if (dataObj && dataObj.payload && dataObj.senderId !== window.myClientId) {
-                        const newStr = JSON.stringify(dataObj.payload);
-                        if (newStr !== lastKnownPayload) {
-                            lastKnownPayload = newStr;
-                            applyRemoteData(dataObj.payload);
+        // 2. 開啟 WebSocket 雙向即時廣播頻道
+        initWebSocketConnection();
+
+        // 3. 備用輪詢，保障 LINE 內建瀏覽器 100% 收得到
+        setInterval(fetchLatestStateFromHttp, 1500);
+    };
+
+    function initWebSocketConnection() {
+        if (isConnecting) return;
+        isConnecting = true;
+
+        try {
+            wsSocket = new WebSocket(PUBLIC_RELAY_URL);
+
+            wsSocket.onopen = () => {
+                isConnecting = false;
+                const statusEl = document.getElementById('syncStatus');
+                if (statusEl) {
+                    statusEl.className = 'sync-status';
+                    statusEl.innerHTML = '🌐 雲端連線成功 (多人即時雙向同步中)';
+                }
+            };
+
+            wsSocket.onmessage = (event) => {
+                if (isRemoteUpdate) return;
+                try {
+                    const rawMsg = JSON.parse(event.data);
+                    // ntfy ws format: { event: 'message', message: '...' }
+                    if (rawMsg && rawMsg.message) {
+                        const payload = JSON.parse(rawMsg.message);
+                        if (payload && payload.senderId !== window.myClientId && payload.data) {
+                            applyRemoteData(payload.data);
                         }
                     }
-                })
-                .catch(() => {
-                    // Fallback to secondary REST
-                    fetch(`https://api.counterapi.dev/v1/baonipingan/live_sync/set?value=1`).catch(()=>{});
-                });
-        };
+                } catch(e) {}
+            };
 
-        if (window.cloudPollTimer) clearInterval(window.cloudPollTimer);
-        window.cloudPollTimer = setInterval(fetchRemote, 1200);
-        fetchRemote();
+            wsSocket.onclose = () => {
+                isConnecting = false;
+                setTimeout(initWebSocketConnection, 2000);
+            };
+
+            wsSocket.onerror = () => {
+                isConnecting = false;
+            };
+        } catch(e) {
+            isConnecting = false;
+        }
+    }
+
+    function fetchLatestStateFromHttp() {
+        if (isRemoteUpdate) return;
+        fetch(`https://ntfy.sh/${WS_TOPIC_ROOM}/raw?poll=1`, { cache: 'no-store' })
+            .then(res => res.text())
+            .then(text => {
+                if (!text) return;
+                const lines = text.trim().split('\n');
+                const lastLine = lines[lines.length - 1];
+                if (lastLine) {
+                    try {
+                        const payload = JSON.parse(lastLine);
+                        if (payload && payload.senderId !== window.myClientId && payload.data) {
+                            applyRemoteData(payload.data);
+                        }
+                    } catch(e) {}
+                }
+            }).catch(() => {});
     }
 
     function applyRemoteData(d) {
@@ -1401,13 +1463,12 @@
         const currentDocId = activeId || 'master_active_group';
         groupData.activeId = currentDocId;
         localStorage.setItem('bao_ni_ping_an_order_v3_' + currentDocId, JSON.stringify(groupData));
-        lastKnownPayload = JSON.stringify(groupData);
 
         if (window.bcChannel) {
             window.bcChannel.postMessage({ senderId: window.myClientId, data: groupData });
         }
 
-        // B. 打回網址列
+        // 打回網址列
         try {
             const packed = btoa(encodeURIComponent(JSON.stringify(groupData)));
             const baseUrl = window.location.origin + window.location.pathname;
@@ -1415,10 +1476,10 @@
             window.history.replaceState({ path: newUrl }, '', newUrl);
         } catch(e) {}
 
-        // C. 推送 KVDB 公開 Key-Value REST 資料庫
-        fetch(`https://kvdb.io/8xK5wZ5y5X5V5U5T5S5R5/baonipingan_master`, {
+        // 透過 HTTP POST 即時發送廣播通知給所有在線裝置
+        fetch(`https://ntfy.sh/${WS_TOPIC_ROOM}`, {
             method: 'POST',
-            body: JSON.stringify({ senderId: window.myClientId, payload: groupData })
+            body: JSON.stringify({ senderId: window.myClientId, data: groupData })
         }).catch(() => {});
     };
 
