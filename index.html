@@ -1070,6 +1070,35 @@
         openHistoryModal(id);
     };
 
+    window.confirmAndSaveAllOrders = function() {
+        if (typeof saveArchiveManual === 'function') {
+            saveArchiveManual();
+        }
+        const groupData = {
+            activeId: activeId || 'master_active_group',
+            date: document.getElementById('orderDate') ? document.getElementById('orderDate').value : '',
+            endDate: document.getElementById('orderEndDate') ? document.getElementById('orderEndDate').value : '',
+            title: document.getElementById('orderTitle') ? document.getElementById('orderTitle').value : '',
+            host: document.getElementById('orderHost') ? document.getElementById('orderHost').value : '',
+            products: [...products],
+            prices: { ...currentPrices },
+            items: orderItems
+        };
+        if (typeof syncListAndActiveGroup === 'function') {
+            syncListAndActiveGroup(groupData);
+        }
+        showToast("✅ 點單資料已確認！並即時廣播更新給所有人！", "success");
+    };
+
+    window.manualRefreshCloudData = function() {
+        showToast("🔄 正在向雲端要求最新點單資料...", "info");
+        if (typeof startPollingRelay === 'function') {
+            startPollingRelay();
+        } else if (typeof initCloudAndRealtime === 'function') {
+            initCloudAndRealtime();
+        }
+    };
+
     window.triggerQueryHistory = function() {
         const selVal = document.getElementById('historySelect') ? document.getElementById('historySelect').value : 'default_813';
         openHistoryModal(selVal || 'default_813');
