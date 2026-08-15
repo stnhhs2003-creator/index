@@ -627,10 +627,16 @@
         }
     }
 
+    let myLastUpdateId = null;
+
     function listenToGroup(id) {
         db.ref('groups/' + id).on('value', (snapshot) => {
             const data = snapshot.val();
             if (data) {
+                // 如果這筆更新是我們自己剛剛發送的，就忽略它，避免重新渲染畫面導致輸入法中斷
+                if (data._updateId && data._updateId === myLastUpdateId) {
+                    return;
+                }
                 isRemoteUpdating = true;
                 applyRemoteData(data);
                 isRemoteUpdating = false;
@@ -645,12 +651,15 @@
         if (isRemoteUpdating) return; // 避免無窮迴圈
         if (!currentGroupId) return;
 
+        myLastUpdateId = Math.random().toString(36).substr(2, 9);
+
         const payload = {
             title: document.getElementById('groupTitle') ? document.getElementById('groupTitle').value : '',
             host: document.getElementById('groupHost') ? document.getElementById('groupHost').value : '',
             products: products,
             prices: prices,
-            members: members
+            members: members,
+            _updateId: myLastUpdateId
         };
 
         // 寫入本地備份
@@ -811,6 +820,38 @@
                 showToast('📋 已自動將個人明細與總結算文字複製到剪貼簿！');
             }).catch(() => {});
         }
+    }
+
+    window.copyModalText = function() {
+        const textarea = document.getElementById('exportTextarea');
+        if (textarea) {
+            textarea.select();
+            document.execCommand('copy');
+        }
+        showToast('已複製結算文字到剪貼簿！');
+    };
+
+    window.closeModal = function() {
+        const modal = document.getElementById('exportModal');
+        if (modal) modal.style.display = 'none';
+    };
+
+    window.closeExportModal = function() {
+        window.closeModal();
+    };
+
+    function showToast(msg) {
+        const container = document.getElementById('toastContainer');
+        let toast = document.getElementById('toast');
+        if (!toast) {
+            toast = document.createElement('div');
+            toast.id = 'toast';
+            toast.className = 'toast';
+            document.body.appendChild(toast);
+        }
+        toast.innerText = msg;
+        toast.style.display = 'block';
+        setTimeout(() => toast.style.display = 'none', 3000);
     }
 
     if (document.readyState === 'loading') {
